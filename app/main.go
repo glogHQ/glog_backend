@@ -1,6 +1,8 @@
 package main
 
 import (
+	"backend/app/auth"
+	"backend/app/models"
 	"encoding/json"
 	"fmt"
 	"github.com/go-playground/validator/v10"
@@ -18,10 +20,11 @@ type App struct {
 	Router    *mux.Router
 	DB        *gorm.DB
 	Authority *authority.Authority
+	Auth      *auth.Auth
 }
 
 func (a *App) Initialize() {
-	db, err := gorm.Open(sqlite.Open("test.db"))
+	db, err := gorm.Open(sqlite.Open("../test.db"))
 
 	if err != nil {
 		log.Fatal(err)
@@ -32,10 +35,11 @@ func (a *App) Initialize() {
 	a.InitializeRoutes()
 	a.Migrate()
 	a.InitializeAuthority()
+	a.InitializeAuth()
 }
 
 func (a *App) Migrate() {
-	a.DB.AutoMigrate(&Post{})
+	a.DB.AutoMigrate(&models.Post{})
 }
 
 func (a *App) InitializeAuthority() {
@@ -44,6 +48,11 @@ func (a *App) InitializeAuthority() {
 		DB:           a.DB,
 	})
 }
+
+func (a *App) InitializeAuth() {
+	a.Auth = auth.New(a.DB)
+}
+
 func (a *App) InitializeRoutes() {
 	a.Router.HandleFunc("/posts", a.getPosts).Methods("GET")
 	a.Router.HandleFunc("/posts", a.createPost).Methods("POST")
@@ -64,7 +73,7 @@ func (a *App) Run() {
 }
 
 func (a *App) getPosts(w http.ResponseWriter, r *http.Request) {
-	var posts []Post
+	var posts []models.Post
 	a.DB.Find(&posts)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -87,7 +96,7 @@ func (a *App) createPost(w http.ResponseWriter, r *http.Request) {
 	validationErrors := err.(validator.ValidationErrors)
 	fmt.Println(validationErrors)
 
-	newPost := &Post{Title: input.Title, Body: input.Body}
+	newPost := &models.Post{Title: input.Title, Body: input.Body}
 
 	a.DB.Create(newPost)
 	w.Header().Set("Content-Type", "application/json")
@@ -114,8 +123,8 @@ func (a *App) updatePost(w http.ResponseWriter, r *http.Request) {
 	validationErrors := valErr.(validator.ValidationErrors)
 	fmt.Println(validationErrors)
 
-	updatePost := &Post{Model: gorm.Model{ID: uint(postId)}}
-	updateData := Post{Title: input.Title, Body: input.Body}
+	updatePost := &models.Post{Model: gorm.Model{ID: uint(postId)}}
+	updateData := models.Post{Title: input.Title, Body: input.Body}
 
 	a.DB.Model(updatePost).Updates(updateData)
 	w.Header().Set("Content-Type", "application/json")
@@ -132,7 +141,7 @@ func (a *App) getPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	post := &Post{}
+	post := &models.Post{}
 	dbErr := a.DB.First(post, postId).Error
 	fmt.Println(dbErr)
 
@@ -150,7 +159,7 @@ func (a *App) deletePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result := a.DB.Delete(&Post{}, postId)
+	result := a.DB.Delete(&models.Post{}, postId)
 	fmt.Println(result.RowsAffected)
 	fmt.Println(result.Error)
 	w.Header().Set("Content-Type", "application/json")

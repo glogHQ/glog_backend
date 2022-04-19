@@ -5,6 +5,7 @@ go 1.17
 require (
 	github.com/go-playground/validator/v10 v10.10.1
 	github.com/gorilla/mux v1.8.0
+	github.com/harranali/authority v1.1.0
 	gorm.io/driver/sqlite v1.3.1
 	gorm.io/gorm v1.23.4
 )
@@ -12,7 +13,6 @@ require (
 require (
 	github.com/go-playground/locales v0.14.0 // indirect
 	github.com/go-playground/universal-translator v0.18.0 // indirect
-	github.com/harranali/authority v1.1.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.4 // indirect
 	github.com/leodido/go-urn v1.2.1 // indirect
