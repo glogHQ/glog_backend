@@ -6,21 +6,21 @@ import (
 	"gorm.io/gorm"
 )
 
-type Auth struct {
+type UserAuth struct {
 	DB *gorm.DB
 }
 
-func New(db *gorm.DB) *Auth {
-	auth := &Auth{DB: db}
+func New(db *gorm.DB) *UserAuth {
+	auth := &UserAuth{DB: db}
 	auth.migrateTables()
 	return auth
 }
 
-func (a *Auth) migrateTables() {
+func (a *UserAuth) migrateTables() {
 	a.DB.AutoMigrate(&models.User{})
 }
 
-func (a *Auth) CreateUser(email string, password string) (*models.User, error) {
+func (a *UserAuth) CreateUser(email string, password string) (*models.User, error) {
 	hashedPassword, hashErr := bcrypt.GenerateFromPassword([]byte(password), 8)
 	if hashErr != nil {
 		return nil, hashErr
@@ -35,12 +35,17 @@ func (a *Auth) CreateUser(email string, password string) (*models.User, error) {
 	return user, nil
 }
 
-func (a *Auth) CheckUserPassword(email string, password string) bool {
+func (a *UserAuth) CheckUserPassword(email string, password string) (*models.User, error) {
 	user := &models.User{}
 	result := a.DB.First(user, "email = ?", email)
 	if result.Error != nil {
-		return false
+		return nil, result.Error
 	}
 
-	return bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)) == nil
+	compareErr := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
+	if compareErr != nil {
+		return nil, compareErr
+	}
+
+	return user, nil
 }

@@ -20,7 +20,7 @@ type App struct {
 	Router    *mux.Router
 	DB        *gorm.DB
 	Authority *authority.Authority
-	Auth      *auth.Auth
+	UserAuth  *auth.UserAuth
 }
 
 func (a *App) Initialize() {
@@ -50,7 +50,7 @@ func (a *App) InitializeAuthority() {
 }
 
 func (a *App) InitializeAuth() {
-	a.Auth = auth.New(a.DB)
+	a.UserAuth = auth.New(a.DB)
 }
 
 func (a *App) InitializeRoutes() {
