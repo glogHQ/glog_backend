@@ -69,3 +69,24 @@ func (a *TokenAuth) CheckAuthToken(token string) (*models.User, error) {
 
 	return &authToken.User, nil
 }
+
+func (a *TokenAuth) RefreshToken(token string) (*models.AuthToken, error) {
+	refreshToken := &models.RefreshToken{}
+	result := a.DB.First(refreshToken, "token = ?", token)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	if refreshToken.ExpiresAt.Before(time.Now()) {
+		return nil, TokenExpiredError
+	}
+
+	authToken := &models.AuthToken{}
+	authTokenResult := a.DB.Preload("User").First(&authToken, refreshToken.ID)
+
+	if authTokenResult.Error != nil {
+		return nil, authTokenResult.Error
+	}
+
+	return a.CreateAuthToken(&authToken.User)
+}
