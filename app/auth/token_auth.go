@@ -4,9 +4,12 @@ import (
 	"backend/app/models"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"gorm.io/gorm"
 	"time"
 )
+
+var TokenExpiredError = errors.New("token is expired")
 
 type TokenAuth struct {
 	DB *gorm.DB
@@ -38,10 +41,10 @@ func (a *TokenAuth) CreateAuthToken(user *models.User) (*models.AuthToken, error
 
 	authToken := &models.AuthToken{
 		Token:     base64.URLEncoding.EncodeToString(randomAccessToken),
-		ExpiresAt: time.Now(),
+		ExpiresAt: time.Now().Add(time.Minute * 10),
 		RefreshToken: models.RefreshToken{
 			Token:     base64.URLEncoding.EncodeToString(randomRefreshToken),
-			ExpiresAt: time.Now(),
+			ExpiresAt: time.Now().Add(time.Hour * 24 * 7),
 		},
 		UserID: user.ID,
 	}
@@ -51,4 +54,18 @@ func (a *TokenAuth) CreateAuthToken(user *models.User) (*models.AuthToken, error
 	}
 
 	return authToken, nil
+}
+
+func (a *TokenAuth) CheckAuthToken(token string) (*models.User, error) {
+	authToken := &models.AuthToken{}
+	result := a.DB.Preload("User").First(authToken, "token = ?", token)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	if authToken.ExpiresAt.Before(time.Now()) {
+		return nil, TokenExpiredError
+	}
+
+	return &authToken.User, nil
 }
