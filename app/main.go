@@ -50,7 +50,7 @@ func (a *App) InitializeAuthority() {
 }
 
 func (a *App) InitializeAuth() {
-	a.UserAuth = auth.New(a.DB)
+	a.UserAuth = auth.NewUserAuth(a.DB)
 }
 
 func (a *App) InitializeRoutes() {

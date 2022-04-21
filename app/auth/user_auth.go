@@ -10,7 +10,7 @@ type UserAuth struct {
 	DB *gorm.DB
 }
 
-func New(db *gorm.DB) *UserAuth {
+func NewUserAuth(db *gorm.DB) *UserAuth {
 	auth := &UserAuth{DB: db}
 	auth.migrateTables()
 	return auth
