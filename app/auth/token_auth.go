@@ -30,13 +30,11 @@ func (a *TokenAuth) CreateAuthToken(user *models.User) (*models.AuthToken, error
 	randomAccessToken := make([]byte, 32)
 	randomRefreshToken := make([]byte, 32)
 
-	_, accessTokenErr := rand.Read(randomAccessToken)
-	if accessTokenErr != nil {
+	if _, accessTokenErr := rand.Read(randomAccessToken); accessTokenErr != nil {
 		return nil, accessTokenErr
 	}
-	_, refreshTokenErr := rand.Read(randomRefreshToken)
-	if refreshTokenErr != nil {
-		return nil, accessTokenErr
+	if _, refreshTokenErr := rand.Read(randomRefreshToken); refreshTokenErr != nil {
+		return nil, refreshTokenErr
 	}
 
 	authToken := &models.AuthToken{
@@ -48,8 +46,8 @@ func (a *TokenAuth) CreateAuthToken(user *models.User) (*models.AuthToken, error
 		},
 		UserID: user.ID,
 	}
-	result := a.DB.Create(authToken)
-	if result.Error != nil {
+
+	if result := a.DB.Create(authToken); result.Error != nil {
 		return nil, result.Error
 	}
 
@@ -58,8 +56,7 @@ func (a *TokenAuth) CreateAuthToken(user *models.User) (*models.AuthToken, error
 
 func (a *TokenAuth) CheckAuthToken(token string) (*models.User, error) {
 	authToken := &models.AuthToken{}
-	result := a.DB.Preload("User").First(authToken, "token = ?", token)
-	if result.Error != nil {
+	if result := a.DB.Preload("User").First(authToken, "token = ?", token); result.Error != nil {
 		return nil, result.Error
 	}
 
@@ -72,8 +69,7 @@ func (a *TokenAuth) CheckAuthToken(token string) (*models.User, error) {
 
 func (a *TokenAuth) RefreshToken(token string) (*models.AuthToken, error) {
 	refreshToken := &models.RefreshToken{}
-	result := a.DB.First(refreshToken, "token = ?", token)
-	if result.Error != nil {
+	if result := a.DB.First(refreshToken, "token = ?", token); result.Error != nil {
 		return nil, result.Error
 	}
 
@@ -82,9 +78,7 @@ func (a *TokenAuth) RefreshToken(token string) (*models.AuthToken, error) {
 	}
 
 	authToken := &models.AuthToken{}
-	authTokenResult := a.DB.Preload("User").First(&authToken, refreshToken.ID)
-
-	if authTokenResult.Error != nil {
+	if authTokenResult := a.DB.Preload("User").First(&authToken, refreshToken.ID); authTokenResult.Error != nil {
 		return nil, authTokenResult.Error
 	}
 
