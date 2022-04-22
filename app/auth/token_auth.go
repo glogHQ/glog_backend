@@ -2,14 +2,23 @@ package auth
 
 import (
 	"backend/app/models"
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"gorm.io/gorm"
+	"net/http"
 	"time"
 )
 
 var TokenExpiredError = errors.New("token is expired")
+
+const AuthTokenCookieName = "auth_token"
+const RefreshTokenCookieName = "refresh_token"
+
+type ContextKey string
+
+const ContextUserKey ContextKey = "user"
 
 type TokenAuth struct {
 	DB *gorm.DB
@@ -83,4 +92,48 @@ func (a *TokenAuth) RefreshToken(token string) (*models.AuthToken, error) {
 	}
 
 	return a.CreateAuthToken(&authToken.User)
+}
+
+func (a *TokenAuth) AuthTokenMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cookie, err := r.Cookie(AuthTokenCookieName)
+		if err != nil {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte("Unauthorized"))
+			return
+		}
+
+		user, authErr := a.CheckAuthToken(cookie.Value)
+		if authErr != nil {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte("Unauthorized"))
+			return
+		}
+
+		ctx := context.WithValue(r.Context(), ContextUserKey, user)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func (a *TokenAuth) CreateAuthCookies(authToken *models.AuthToken) (*http.Cookie, *http.Cookie) {
+	now := time.Now()
+	authTokenCookie := &http.Cookie{
+		Name:     AuthTokenCookieName,
+		Value:    authToken.Token,
+		Path:     "/",
+		MaxAge:   int(authToken.ExpiresAt.Sub(now).Seconds()),
+		Secure:   false,
+		HttpOnly: true,
+	}
+
+	refreshTokenCookie := &http.Cookie{
+		Name:     RefreshTokenCookieName,
+		Value:    authToken.RefreshToken.Token,
+		Path:     "/",
+		MaxAge:   int(authToken.RefreshToken.ExpiresAt.Sub(now).Seconds()),
+		Secure:   false,
+		HttpOnly: true,
+	}
+
+	return authTokenCookie, refreshTokenCookie
 }
