@@ -6,14 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/go-playground/validator/v10"
+	"github.com/gorilla/mux"
 	"github.com/harranali/authority"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 	"log"
 	"net/http"
 	"strconv"
-
-	"github.com/gorilla/mux"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 )
 
 type App struct {
@@ -21,6 +20,7 @@ type App struct {
 	DB        *gorm.DB
 	Authority *authority.Authority
 	UserAuth  *auth.UserAuth
+	TokenAuth *auth.TokenAuth
 }
 
 func (a *App) Initialize() {
@@ -32,10 +32,10 @@ func (a *App) Initialize() {
 	a.DB = db
 	a.Router = mux.NewRouter()
 
-	a.InitializeRoutes()
 	a.Migrate()
 	a.InitializeAuthority()
 	a.InitializeAuth()
+	a.InitializeRoutes()
 }
 
 func (a *App) Migrate() {
@@ -51,14 +51,21 @@ func (a *App) InitializeAuthority() {
 
 func (a *App) InitializeAuth() {
 	a.UserAuth = auth.NewUserAuth(a.DB)
+	a.TokenAuth = auth.NewTokenAuth(a.DB)
+	a.UserAuth.CreateUser("test", "test")
 }
 
 func (a *App) InitializeRoutes() {
+	authWrapper := func(handler func(http.ResponseWriter, *http.Request)) http.Handler {
+		return a.TokenAuth.AuthTokenMiddleware(http.HandlerFunc(handler))
+	}
 	a.Router.HandleFunc("/posts", a.getPosts).Methods("GET")
-	a.Router.HandleFunc("/posts", a.createPost).Methods("POST")
+	a.Router.Handle("/posts", authWrapper(a.createPost)).Methods("POST")
 	a.Router.HandleFunc("/posts/{id:[0-9]+}", a.getPost).Methods("GET")
-	a.Router.HandleFunc("/posts/{id:[0-9]+}", a.updatePost).Methods("PATCH")
-	a.Router.HandleFunc("/posts/{id:[0-9]+}", a.deletePost).Methods("DELETE")
+	a.Router.Handle("/posts/{id:[0-9]+}", authWrapper(a.updatePost)).Methods("PATCH")
+	a.Router.Handle("/posts/{id:[0-9]+}", authWrapper(a.deletePost)).Methods("DELETE")
+	a.Router.HandleFunc("/auth/login", a.login)
+	a.Router.HandleFunc("/auth/refresh-token", a.refreshToken)
 }
 
 func logRequest(handler http.Handler) http.Handler {
@@ -72,7 +79,35 @@ func (a *App) Run() {
 	log.Fatal(http.ListenAndServe(":8010", logRequest(a.Router)))
 }
 
+func (a *App) login(w http.ResponseWriter, r *http.Request) {
+	user, _ := a.UserAuth.CheckUserPassword("test", "test")
+	authToken, _ := a.TokenAuth.CreateAuthToken(user)
+	authTokenCookie, refreshTokenCookie := a.TokenAuth.CreateAuthCookies(authToken)
+	http.SetCookie(w, authTokenCookie)
+	http.SetCookie(w, refreshTokenCookie)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+}
+
+func (a *App) refreshToken(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie(auth.RefreshTokenCookieName)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte("Unauthorized"))
+		return
+	}
+
+	authToken, _ := a.TokenAuth.RefreshToken(cookie.Value)
+	authTokenCookie, refreshTokenCookie := a.TokenAuth.CreateAuthCookies(authToken)
+	http.SetCookie(w, authTokenCookie)
+	http.SetCookie(w, refreshTokenCookie)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+}
+
 func (a *App) getPosts(w http.ResponseWriter, r *http.Request) {
+	user := r.Context().Value(auth.ContextUserKey).(*models.User)
+	fmt.Println(user)
 	var posts []models.Post
 	a.DB.Find(&posts)
 	w.Header().Set("Content-Type", "application/json")
