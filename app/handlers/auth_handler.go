@@ -42,6 +42,18 @@ func NewAuthHandler(userAuth *auth.UserAuth, tokenAuth *auth.TokenAuth, validato
 	}
 }
 
+func (a *AuthHandler) createAuthCookiesForUser(user *models.User) (*AuthCookies, error) {
+	authToken, authTokenErr := a.TokenAuth.CreateAuthToken(user)
+	if authTokenErr != nil {
+		return nil, authTokenErr
+	}
+	authTokenCookie, refreshTokenCookie := a.TokenAuth.CreateAuthCookies(authToken)
+	return &AuthCookies{
+		AuthTokenCookie:    authTokenCookie,
+		RefreshTokenCookie: refreshTokenCookie,
+	}, nil
+}
+
 func (a *AuthHandler) Register(registerRequest *RegisterRequest) (*RegisterResponse, error) {
 	if valErr := a.Validator.Struct(registerRequest); valErr != nil {
 		return nil, valErr.(validator.ValidationErrors)
@@ -51,17 +63,14 @@ func (a *AuthHandler) Register(registerRequest *RegisterRequest) (*RegisterRespo
 		return nil, userErr
 	}
 
-	authToken, authTokenErr := a.TokenAuth.CreateAuthToken(user)
-	if authTokenErr != nil {
-		return nil, authTokenErr
+	authCookies, authCookiesErr := a.createAuthCookiesForUser(user)
+	if authCookiesErr != nil {
+		return nil, authCookiesErr
 	}
-	authTokenCookie, refreshTokenCookie := a.TokenAuth.CreateAuthCookies(authToken)
+
 	return &RegisterResponse{
-		User: user,
-		Cookies: &AuthCookies{
-			AuthTokenCookie:    authTokenCookie,
-			RefreshTokenCookie: refreshTokenCookie,
-		},
+		User:    user,
+		Cookies: authCookies,
 	}, nil
 }
 
@@ -73,15 +82,8 @@ func (a *AuthHandler) Login(loginRequest *LoginRequest) (*AuthCookies, error) {
 	if checkUserErr != nil {
 		return nil, checkUserErr
 	}
-	authToken, authTokenErr := a.TokenAuth.CreateAuthToken(user)
-	if authTokenErr != nil {
-		return nil, authTokenErr
-	}
-	authTokenCookie, refreshTokenCookie := a.TokenAuth.CreateAuthCookies(authToken)
-	return &AuthCookies{
-		AuthTokenCookie:    authTokenCookie,
-		RefreshTokenCookie: refreshTokenCookie,
-	}, nil
+
+	return a.createAuthCookiesForUser(user)
 }
 
 func (a *AuthHandler) RefreshToken(refreshToken string) (*AuthCookies, error) {
