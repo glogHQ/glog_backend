@@ -17,12 +17,13 @@ import (
 )
 
 type App struct {
-	Router      *mux.Router
-	DB          *gorm.DB
-	Authority   *authority.Authority
-	UserAuth    *auth.UserAuth
-	TokenAuth   *auth.TokenAuth
-	AuthHandler *handlers.AuthHandler
+	Router       *mux.Router
+	DB           *gorm.DB
+	Authority    *authority.Authority
+	UserAuth     *auth.UserAuth
+	TokenAuth    *auth.TokenAuth
+	AuthHandler  *handlers.AuthHandler
+	PostsHandler *handlers.PostsHandler
 }
 
 func (a *App) Initialize() {
@@ -55,6 +56,7 @@ func (a *App) InitializeAuth() {
 	a.UserAuth = auth.NewUserAuth(a.DB)
 	a.TokenAuth = auth.NewTokenAuth(a.DB)
 	a.AuthHandler = handlers.NewAuthHandler(a.UserAuth, a.TokenAuth, validate)
+	a.PostsHandler = handlers.NewPostHandler(a.DB, validate)
 }
 
 func (a *App) InitializeRoutes() {
@@ -140,36 +142,29 @@ func (a *App) refreshToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) getPosts(w http.ResponseWriter, r *http.Request) {
-	var posts []models.Post
-	a.DB.Find(&posts)
+	posts := a.PostsHandler.GetPosts()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(posts)
 }
 
-type createPostRequest struct {
-	Title string `json:"title" validate:"required"`
-	Body  string `json:"body" validate:"required"`
-}
-
 func (a *App) createPost(w http.ResponseWriter, r *http.Request) {
-	input := &createPostRequest{}
+	input := &handlers.CreatePostRequest{}
 	if err := json.NewDecoder(r.Body).Decode(input); err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	err := validate.Struct(input)
-	validationErrors := err.(validator.ValidationErrors)
-	fmt.Println(validationErrors)
-
 	user := r.Context().Value(auth.ContextUserKey).(*models.User)
-	newPost := &models.Post{Title: input.Title, Body: input.Body, UserID: user.ID}
+	post, createErr := a.PostsHandler.CreatePost(input, user)
+	if createErr != nil {
+		fmt.Println(createErr)
+		return
+	}
 
-	a.DB.Create(newPost)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(newPost)
+	json.NewEncoder(w).Encode(post)
 }
 
 func (a *App) updatePost(w http.ResponseWriter, r *http.Request) {
@@ -181,23 +176,21 @@ func (a *App) updatePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	input := &createPostRequest{}
+	input := &handlers.CreatePostRequest{}
 	if err := json.NewDecoder(r.Body).Decode(input); err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	valErr := validate.Struct(input)
-	validationErrors := valErr.(validator.ValidationErrors)
-	fmt.Println(validationErrors)
+	updatedPost, updateErr := a.PostsHandler.UpdatePost(input, uint(postId))
+	if updateErr != nil {
+		fmt.Println(updateErr)
+		return
+	}
 
-	updatePost := &models.Post{Model: gorm.Model{ID: uint(postId)}}
-	updateData := models.Post{Title: input.Title, Body: input.Body}
-
-	a.DB.Model(updatePost).Updates(updateData)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(updatePost)
+	json.NewEncoder(w).Encode(updatedPost)
 }
 
 func (a *App) getPost(w http.ResponseWriter, r *http.Request) {
@@ -209,9 +202,11 @@ func (a *App) getPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	post := &models.Post{}
-	dbErr := a.DB.First(post, postId).Error
-	fmt.Println(dbErr)
+	post, postErr := a.PostsHandler.GetPost(uint(postId))
+	if postErr != nil {
+		fmt.Println(postErr)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -226,10 +221,11 @@ func (a *App) deletePost(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("Error converting id")
 		return
 	}
+	if deleteErr := a.PostsHandler.DeletePost(uint(postId)); deleteErr != nil {
+		fmt.Println(deleteErr)
+		return
+	}
 
-	result := a.DB.Delete(&models.Post{}, postId)
-	fmt.Println(result.RowsAffected)
-	fmt.Println(result.Error)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -7,5 +7,5 @@ type Post struct {
 	Title  string
 	Body   string
 	UserID uint
-	User   User
+	User   User `json:"-"`
 }

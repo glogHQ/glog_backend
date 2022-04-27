@@ -15,6 +15,12 @@ type PostsHandler struct {
 	Validator *validator.Validate
 }
 
+func NewPostHandler(db *gorm.DB, validator *validator.Validate) *PostsHandler {
+	return &PostsHandler{
+		DB:        db,
+		Validator: validator,
+	}
+}
 func (p *PostsHandler) GetPosts() *[]models.Post {
 	var posts []models.Post
 	p.DB.Find(&posts)
