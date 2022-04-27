@@ -2,6 +2,7 @@ package main
 
 import (
 	"backend/app/auth"
+	"backend/app/handlers"
 	"backend/app/models"
 	"encoding/json"
 	"fmt"
@@ -16,11 +17,12 @@ import (
 )
 
 type App struct {
-	Router    *mux.Router
-	DB        *gorm.DB
-	Authority *authority.Authority
-	UserAuth  *auth.UserAuth
-	TokenAuth *auth.TokenAuth
+	Router      *mux.Router
+	DB          *gorm.DB
+	Authority   *authority.Authority
+	UserAuth    *auth.UserAuth
+	TokenAuth   *auth.TokenAuth
+	AuthHandler *handlers.AuthHandler
 }
 
 func (a *App) Initialize() {
@@ -52,7 +54,7 @@ func (a *App) InitializeAuthority() {
 func (a *App) InitializeAuth() {
 	a.UserAuth = auth.NewUserAuth(a.DB)
 	a.TokenAuth = auth.NewTokenAuth(a.DB)
-	a.UserAuth.CreateUser("test", "test")
+	a.AuthHandler = handlers.NewAuthHandler(a.UserAuth, a.TokenAuth, validate)
 }
 
 func (a *App) InitializeRoutes() {
@@ -64,8 +66,9 @@ func (a *App) InitializeRoutes() {
 	a.Router.HandleFunc("/posts/{id:[0-9]+}", a.getPost).Methods("GET")
 	a.Router.Handle("/posts/{id:[0-9]+}", authWrapper(a.updatePost)).Methods("PATCH")
 	a.Router.Handle("/posts/{id:[0-9]+}", authWrapper(a.deletePost)).Methods("DELETE")
-	a.Router.HandleFunc("/auth/login", a.login)
-	a.Router.HandleFunc("/auth/refresh-token", a.refreshToken)
+	a.Router.HandleFunc("/auth/login", a.login).Methods("POST")
+	a.Router.HandleFunc("/auth/register", a.register).Methods("POST")
+	a.Router.HandleFunc("/auth/refresh-token", a.refreshToken).Methods("POST")
 }
 
 func logRequest(handler http.Handler) http.Handler {
@@ -80,13 +83,40 @@ func (a *App) Run() {
 }
 
 func (a *App) login(w http.ResponseWriter, r *http.Request) {
-	user, _ := a.UserAuth.CheckUserPassword("test", "test")
-	authToken, _ := a.TokenAuth.CreateAuthToken(user)
-	authTokenCookie, refreshTokenCookie := a.TokenAuth.CreateAuthCookies(authToken)
-	http.SetCookie(w, authTokenCookie)
-	http.SetCookie(w, refreshTokenCookie)
+	loginRequest := &handlers.LoginRequest{}
+	if err := json.NewDecoder(r.Body).Decode(loginRequest); err != nil {
+		fmt.Println(err)
+		return
+	}
+	authCookies, loginErr := a.AuthHandler.Login(loginRequest)
+	if loginErr != nil {
+		fmt.Println(loginErr)
+		return
+	}
+
+	http.SetCookie(w, authCookies.AuthTokenCookie)
+	http.SetCookie(w, authCookies.RefreshTokenCookie)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+}
+
+func (a *App) register(w http.ResponseWriter, r *http.Request) {
+	registerRequest := &handlers.RegisterRequest{}
+	if err := json.NewDecoder(r.Body).Decode(registerRequest); err != nil {
+		fmt.Println(err)
+		return
+	}
+	registerResponse, registerErr := a.AuthHandler.Register(registerRequest)
+	if registerErr != nil {
+		fmt.Println(registerErr)
+		return
+	}
+
+	http.SetCookie(w, registerResponse.Cookies.AuthTokenCookie)
+	http.SetCookie(w, registerResponse.Cookies.RefreshTokenCookie)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(registerResponse.User)
 }
 
 func (a *App) refreshToken(w http.ResponseWriter, r *http.Request) {
@@ -97,17 +127,19 @@ func (a *App) refreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	authToken, _ := a.TokenAuth.RefreshToken(cookie.Value)
-	authTokenCookie, refreshTokenCookie := a.TokenAuth.CreateAuthCookies(authToken)
-	http.SetCookie(w, authTokenCookie)
-	http.SetCookie(w, refreshTokenCookie)
+	authCookies, loginErr := a.AuthHandler.RefreshToken(cookie.Value)
+	if loginErr != nil {
+		fmt.Println(loginErr)
+		return
+	}
+
+	http.SetCookie(w, authCookies.AuthTokenCookie)
+	http.SetCookie(w, authCookies.RefreshTokenCookie)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 }
 
 func (a *App) getPosts(w http.ResponseWriter, r *http.Request) {
-	user := r.Context().Value(auth.ContextUserKey).(*models.User)
-	fmt.Println(user)
 	var posts []models.Post
 	a.DB.Find(&posts)
 	w.Header().Set("Content-Type", "application/json")
@@ -131,7 +163,8 @@ func (a *App) createPost(w http.ResponseWriter, r *http.Request) {
 	validationErrors := err.(validator.ValidationErrors)
 	fmt.Println(validationErrors)
 
-	newPost := &models.Post{Title: input.Title, Body: input.Body}
+	user := r.Context().Value(auth.ContextUserKey).(*models.User)
+	newPost := &models.Post{Title: input.Title, Body: input.Body, UserID: user.ID}
 
 	a.DB.Create(newPost)
 	w.Header().Set("Content-Type", "application/json")
