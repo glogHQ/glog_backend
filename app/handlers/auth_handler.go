@@ -12,7 +12,7 @@ type AuthCookies struct {
 	RefreshTokenCookie *http.Cookie
 }
 
-type RegisterResponse struct {
+type LoginResponse struct {
 	User    *models.User
 	Cookies *AuthCookies
 }
@@ -54,7 +54,7 @@ func (a *AuthHandler) createAuthCookiesForUser(user *models.User) (*AuthCookies,
 	}, nil
 }
 
-func (a *AuthHandler) Register(registerRequest *RegisterRequest) (*RegisterResponse, error) {
+func (a *AuthHandler) Register(registerRequest *RegisterRequest) (*LoginResponse, error) {
 	if valErr := a.Validator.Struct(registerRequest); valErr != nil {
 		return nil, valErr.(validator.ValidationErrors)
 	}
@@ -68,13 +68,13 @@ func (a *AuthHandler) Register(registerRequest *RegisterRequest) (*RegisterRespo
 		return nil, authCookiesErr
 	}
 
-	return &RegisterResponse{
+	return &LoginResponse{
 		User:    user,
 		Cookies: authCookies,
 	}, nil
 }
 
-func (a *AuthHandler) Login(loginRequest *LoginRequest) (*AuthCookies, error) {
+func (a *AuthHandler) Login(loginRequest *LoginRequest) (*LoginResponse, error) {
 	if valErr := a.Validator.Struct(loginRequest); valErr != nil {
 		return nil, valErr.(validator.ValidationErrors)
 	}
@@ -83,7 +83,15 @@ func (a *AuthHandler) Login(loginRequest *LoginRequest) (*AuthCookies, error) {
 		return nil, checkUserErr
 	}
 
-	return a.createAuthCookiesForUser(user)
+	authCookies, authCookiesErr := a.createAuthCookiesForUser(user)
+	if authCookiesErr != nil {
+		return nil, authCookiesErr
+	}
+
+	return &LoginResponse{
+		User:    user,
+		Cookies: authCookies,
+	}, nil
 }
 
 func (a *AuthHandler) RefreshToken(refreshToken string) (*AuthCookies, error) {

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/go-playground/validator/v10"
+	mux_handlers "github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/harranali/authority"
 	"gorm.io/driver/sqlite"
@@ -60,6 +61,14 @@ func (a *App) InitializeAuth() {
 }
 
 func (a *App) InitializeRoutes() {
+	cors := mux_handlers.CORS(
+		mux_handlers.AllowedHeaders([]string{"content-type"}),
+		mux_handlers.AllowedOrigins([]string{"http://localhost:3000"}),
+		mux_handlers.AllowCredentials(),
+	)
+
+	a.Router.Use(cors)
+
 	authWrapper := func(handler func(http.ResponseWriter, *http.Request)) http.Handler {
 		return a.TokenAuth.AuthTokenMiddleware(http.HandlerFunc(handler))
 	}
@@ -68,9 +77,10 @@ func (a *App) InitializeRoutes() {
 	a.Router.HandleFunc("/posts/{id:[0-9]+}", a.getPost).Methods("GET")
 	a.Router.Handle("/posts/{id:[0-9]+}", authWrapper(a.updatePost)).Methods("PATCH")
 	a.Router.Handle("/posts/{id:[0-9]+}", authWrapper(a.deletePost)).Methods("DELETE")
-	a.Router.HandleFunc("/auth/login", a.login).Methods("POST")
+	a.Router.HandleFunc("/auth/login", a.login).Methods("POST", "OPTIONS")
 	a.Router.HandleFunc("/auth/register", a.register).Methods("POST")
 	a.Router.HandleFunc("/auth/refresh-token", a.refreshToken).Methods("POST")
+	a.Router.Handle("/user", authWrapper(a.getUser)).Methods("GET", "OPTIONS")
 }
 
 func logRequest(handler http.Handler) http.Handler {
@@ -84,22 +94,30 @@ func (a *App) Run() {
 	log.Fatal(http.ListenAndServe(":8010", logRequest(a.Router)))
 }
 
+func (a *App) getUser(w http.ResponseWriter, r *http.Request) {
+	user := r.Context().Value(auth.ContextUserKey).(*models.User)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(user)
+}
+
 func (a *App) login(w http.ResponseWriter, r *http.Request) {
 	loginRequest := &handlers.LoginRequest{}
 	if err := json.NewDecoder(r.Body).Decode(loginRequest); err != nil {
 		fmt.Println(err)
 		return
 	}
-	authCookies, loginErr := a.AuthHandler.Login(loginRequest)
+	loginResponse, loginErr := a.AuthHandler.Login(loginRequest)
 	if loginErr != nil {
 		fmt.Println(loginErr)
 		return
 	}
 
-	http.SetCookie(w, authCookies.AuthTokenCookie)
-	http.SetCookie(w, authCookies.RefreshTokenCookie)
+	http.SetCookie(w, loginResponse.Cookies.AuthTokenCookie)
+	http.SetCookie(w, loginResponse.Cookies.RefreshTokenCookie)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(loginResponse.User)
 }
 
 func (a *App) register(w http.ResponseWriter, r *http.Request) {
