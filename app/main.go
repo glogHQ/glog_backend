@@ -3,6 +3,7 @@ package main
 import (
 	"backend/app/auth"
 	"backend/app/handlers"
+	"backend/app/middlewares"
 	"backend/app/models"
 	"encoding/json"
 	"fmt"
@@ -39,6 +40,7 @@ func (a *App) Initialize() {
 	a.Migrate()
 	a.InitializeAuthority()
 	a.InitializeAuth()
+	a.InitializeHandlers()
 	a.InitializeRoutes()
 }
 
@@ -56,6 +58,10 @@ func (a *App) InitializeAuthority() {
 func (a *App) InitializeAuth() {
 	a.UserAuth = auth.NewUserAuth(a.DB)
 	a.TokenAuth = auth.NewTokenAuth(a.DB)
+}
+
+func (a *App) InitializeHandlers() {
+	validate := validator.New()
 	a.AuthHandler = handlers.NewAuthHandler(a.UserAuth, a.TokenAuth, validate)
 	a.PostsHandler = handlers.NewPostHandler(a.DB, validate)
 }
@@ -67,7 +73,7 @@ func (a *App) InitializeRoutes() {
 		mux_handlers.AllowCredentials(),
 	)
 
-	a.Router.Use(cors)
+	a.Router.Use(cors, middlewares.JSONResponseMiddleware)
 
 	authWrapper := func(handler func(http.ResponseWriter, *http.Request)) http.Handler {
 		return a.TokenAuth.AuthTokenMiddleware(http.HandlerFunc(handler))
@@ -96,7 +102,6 @@ func (a *App) Run() {
 
 func (a *App) getUser(w http.ResponseWriter, r *http.Request) {
 	user := r.Context().Value(auth.ContextUserKey).(*models.User)
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(user)
 }
@@ -115,7 +120,6 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 
 	http.SetCookie(w, loginResponse.Cookies.AuthTokenCookie)
 	http.SetCookie(w, loginResponse.Cookies.RefreshTokenCookie)
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(loginResponse.User)
 }
@@ -134,7 +138,6 @@ func (a *App) register(w http.ResponseWriter, r *http.Request) {
 
 	http.SetCookie(w, registerResponse.Cookies.AuthTokenCookie)
 	http.SetCookie(w, registerResponse.Cookies.RefreshTokenCookie)
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(registerResponse.User)
 }
@@ -155,13 +158,11 @@ func (a *App) refreshToken(w http.ResponseWriter, r *http.Request) {
 
 	http.SetCookie(w, authCookies.AuthTokenCookie)
 	http.SetCookie(w, authCookies.RefreshTokenCookie)
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 }
 
 func (a *App) getPosts(w http.ResponseWriter, r *http.Request) {
 	posts := a.PostsHandler.GetPosts()
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(posts)
 }
@@ -180,7 +181,6 @@ func (a *App) createPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(post)
 }
@@ -206,7 +206,6 @@ func (a *App) updatePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(updatedPost)
 }
@@ -226,7 +225,6 @@ func (a *App) getPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(post)
 }
@@ -244,16 +242,11 @@ func (a *App) deletePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNoContent)
 }
 
-var validate *validator.Validate
-
 func main() {
 	fmt.Println("Starting")
-
-	validate = validator.New()
 
 	a := App{}
 	a.Initialize()
@@ -262,4 +255,6 @@ func main() {
 	if err == nil {
 		sqlDB.Close()
 	}
+
+	defer sqlDB.Close()
 }
