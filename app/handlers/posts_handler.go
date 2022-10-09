@@ -10,6 +10,7 @@ type CreatePostRequest struct {
 	Title string `json:"title" validate:"required"`
 	Body  string `json:"body" validate:"required"`
 }
+
 type PostsHandler struct {
 	DB        *gorm.DB
 	Validator *validator.Validate
@@ -21,6 +22,7 @@ func NewPostHandler(db *gorm.DB, validator *validator.Validate) *PostsHandler {
 		Validator: validator,
 	}
 }
+
 func (p *PostsHandler) GetPosts() *[]models.Post {
 	var posts []models.Post
 	p.DB.Find(&posts)

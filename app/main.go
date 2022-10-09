@@ -2,20 +2,20 @@ package main
 
 import (
 	"backend/app/auth"
+	"backend/app/controllers"
 	"backend/app/handlers"
 	"backend/app/middlewares"
 	"backend/app/models"
-	"encoding/json"
 	"fmt"
+	"log"
+	"net/http"
+
 	"github.com/go-playground/validator/v10"
 	mux_handlers "github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/harranali/authority"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
-	"log"
-	"net/http"
-	"strconv"
 )
 
 type App struct {
@@ -41,7 +41,7 @@ func (a *App) Initialize() {
 	a.InitializeAuthority()
 	a.InitializeAuth()
 	a.InitializeHandlers()
-	a.InitializeRoutes()
+	a.InitializeControllers()
 }
 
 func (a *App) Migrate() {
@@ -66,7 +66,7 @@ func (a *App) InitializeHandlers() {
 	a.PostsHandler = handlers.NewPostHandler(a.DB, validate)
 }
 
-func (a *App) InitializeRoutes() {
+func (a *App) InitializeControllers() {
 	cors := mux_handlers.CORS(
 		mux_handlers.AllowedHeaders([]string{"content-type"}),
 		mux_handlers.AllowedOrigins([]string{"http://localhost:3000"}),
@@ -75,18 +75,17 @@ func (a *App) InitializeRoutes() {
 
 	a.Router.Use(cors, middlewares.JSONResponseMiddleware)
 
-	authWrapper := func(handler func(http.ResponseWriter, *http.Request)) http.Handler {
-		return a.TokenAuth.AuthTokenMiddleware(http.HandlerFunc(handler))
-	}
-	a.Router.HandleFunc("/posts", a.getPosts).Methods("GET")
-	a.Router.Handle("/posts", authWrapper(a.createPost)).Methods("POST")
-	a.Router.HandleFunc("/posts/{id:[0-9]+}", a.getPost).Methods("GET")
-	a.Router.Handle("/posts/{id:[0-9]+}", authWrapper(a.updatePost)).Methods("PATCH")
-	a.Router.Handle("/posts/{id:[0-9]+}", authWrapper(a.deletePost)).Methods("DELETE")
-	a.Router.HandleFunc("/auth/login", a.login).Methods("POST", "OPTIONS")
-	a.Router.HandleFunc("/auth/register", a.register).Methods("POST")
-	a.Router.HandleFunc("/auth/refresh-token", a.refreshToken).Methods("POST")
-	a.Router.Handle("/user", authWrapper(a.getUser)).Methods("GET", "OPTIONS")
+	postsRouter := a.Router.PathPrefix("/posts").Subrouter()
+	postsController := controllers.NewPostsController(a.TokenAuth, a.PostsHandler)
+	postsController.Init(postsRouter)
+
+	authRouter := a.Router.PathPrefix("/auth").Subrouter()
+	authController := controllers.NewAuthController(a.AuthHandler)
+	authController.Init(authRouter)
+
+	usersRouter := a.Router.PathPrefix("/user").Subrouter()
+	usersController := controllers.NewUsersController(a.TokenAuth)
+	usersController.Init(usersRouter)
 }
 
 func logRequest(handler http.Handler) http.Handler {
@@ -98,151 +97,6 @@ func logRequest(handler http.Handler) http.Handler {
 
 func (a *App) Run() {
 	log.Fatal(http.ListenAndServe(":8010", logRequest(a.Router)))
-}
-
-func (a *App) getUser(w http.ResponseWriter, r *http.Request) {
-	user := r.Context().Value(auth.ContextUserKey).(*models.User)
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(user)
-}
-
-func (a *App) login(w http.ResponseWriter, r *http.Request) {
-	loginRequest := &handlers.LoginRequest{}
-	if err := json.NewDecoder(r.Body).Decode(loginRequest); err != nil {
-		fmt.Println(err)
-		return
-	}
-	loginResponse, loginErr := a.AuthHandler.Login(loginRequest)
-	if loginErr != nil {
-		fmt.Println(loginErr)
-		return
-	}
-
-	http.SetCookie(w, loginResponse.Cookies.AuthTokenCookie)
-	http.SetCookie(w, loginResponse.Cookies.RefreshTokenCookie)
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(loginResponse.User)
-}
-
-func (a *App) register(w http.ResponseWriter, r *http.Request) {
-	registerRequest := &handlers.RegisterRequest{}
-	if err := json.NewDecoder(r.Body).Decode(registerRequest); err != nil {
-		fmt.Println(err)
-		return
-	}
-	registerResponse, registerErr := a.AuthHandler.Register(registerRequest)
-	if registerErr != nil {
-		fmt.Println(registerErr)
-		return
-	}
-
-	http.SetCookie(w, registerResponse.Cookies.AuthTokenCookie)
-	http.SetCookie(w, registerResponse.Cookies.RefreshTokenCookie)
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(registerResponse.User)
-}
-
-func (a *App) refreshToken(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie(auth.RefreshTokenCookieName)
-	if err != nil {
-		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte("Unauthorized"))
-		return
-	}
-
-	authCookies, loginErr := a.AuthHandler.RefreshToken(cookie.Value)
-	if loginErr != nil {
-		fmt.Println(loginErr)
-		return
-	}
-
-	http.SetCookie(w, authCookies.AuthTokenCookie)
-	http.SetCookie(w, authCookies.RefreshTokenCookie)
-	w.WriteHeader(http.StatusOK)
-}
-
-func (a *App) getPosts(w http.ResponseWriter, r *http.Request) {
-	posts := a.PostsHandler.GetPosts()
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(posts)
-}
-
-func (a *App) createPost(w http.ResponseWriter, r *http.Request) {
-	input := &handlers.CreatePostRequest{}
-	if err := json.NewDecoder(r.Body).Decode(input); err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	user := r.Context().Value(auth.ContextUserKey).(*models.User)
-	post, createErr := a.PostsHandler.CreatePost(input, user)
-	if createErr != nil {
-		fmt.Println(createErr)
-		return
-	}
-
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(post)
-}
-
-func (a *App) updatePost(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	postIdString := vars["id"]
-	postId, err := strconv.Atoi(postIdString)
-	if err != nil {
-		fmt.Println("Error converting id")
-		return
-	}
-
-	input := &handlers.CreatePostRequest{}
-	if err := json.NewDecoder(r.Body).Decode(input); err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	updatedPost, updateErr := a.PostsHandler.UpdatePost(input, uint(postId))
-	if updateErr != nil {
-		fmt.Println(updateErr)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(updatedPost)
-}
-
-func (a *App) getPost(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	postIdString := vars["id"]
-	postId, err := strconv.Atoi(postIdString)
-	if err != nil {
-		fmt.Println("Error converting id")
-		return
-	}
-
-	post, postErr := a.PostsHandler.GetPost(uint(postId))
-	if postErr != nil {
-		fmt.Println(postErr)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(post)
-}
-
-func (a *App) deletePost(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	postIdString := vars["id"]
-	postId, err := strconv.Atoi(postIdString)
-	if err != nil {
-		fmt.Println("Error converting id")
-		return
-	}
-	if deleteErr := a.PostsHandler.DeletePost(uint(postId)); deleteErr != nil {
-		fmt.Println(deleteErr)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func main() {
